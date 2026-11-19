@@ -33,6 +33,70 @@ export function findSupportedEffort(
     return options.find(o => o.reasoningEffort === effort)?.reasoningEffort;
 }
 
+const MAX_EXTRA_MODELS = 64;
+
+/**
+ * Custom model ids from a client's `_meta.extraModels` (trimmed, deduped,
+ * capped). The client injects them so the model picker can offer ids Codex's
+ * own catalog does not name, for example a gateway model.
+ */
+export function extraModelIdsFromMeta(meta: unknown): string[] {
+    const raw = (meta as {extraModels?: unknown} | null | undefined)?.extraModels;
+    if (!Array.isArray(raw)) return [];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const item of raw) {
+        if (typeof item !== "string") continue;
+        const id = item.trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        out.push(id);
+        if (out.length >= MAX_EXTRA_MODELS) break;
+    }
+    return out;
+}
+
+/**
+ * Appends client-supplied models to the session's catalog. A synthesized entry
+ * carries the id as its model and a formatted display name; the client maps it
+ * to the friendly name it configured. Codex has no metadata for these ids, so
+ * the entry borrows the current model's effort list rather than inventing one.
+ */
+export function withClientModels(
+    availableModels: ReadonlyArray<Model>,
+    extraIds: ReadonlyArray<string>,
+    fallbackEfforts: ReadonlyArray<ReasoningEffortOption>,
+    fallbackEffort: ReasoningEffort,
+): Model[] {
+    if (extraIds.length === 0) return [...availableModels];
+    const out = [...availableModels];
+    for (const id of extraIds) {
+        if (out.some(model => model.id === id)) continue;
+        out.push({
+            id,
+            model: id,
+            upgrade: null,
+            upgradeInfo: null,
+            availabilityNux: null,
+            displayName: formatModelDisplayName(id),
+            description: "",
+            modelSpecialty: null,
+            hidden: false,
+            supportedReasoningEfforts: fallbackEfforts.map(option => ({...option})),
+            defaultReasoningEffort: fallbackEffort,
+            inputModalities: ["text", "image"],
+            supportsPersonality: false,
+            multiAgentVersion: null,
+            additionalSpeedTiers: [],
+            serviceTiers: [],
+            defaultServiceTier: null,
+            availableAccessPrograms: null,
+            isDefault: false,
+        });
+    }
+    return out;
+}
+
 type ModelOption = { value: string; name: string; description: string | null };
 
 /** The entries of the session `model` option. */

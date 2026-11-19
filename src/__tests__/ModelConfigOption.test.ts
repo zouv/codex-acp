@@ -1,5 +1,11 @@
 import {describe, expect, it} from "vitest";
-import {createModelConfigOption, createReasoningEffortConfigOption, formatModelDisplayName} from "../ModelConfigOption";
+import {
+    createModelConfigOption,
+    createReasoningEffortConfigOption,
+    extraModelIdsFromMeta,
+    formatModelDisplayName,
+    withClientModels,
+} from "../ModelConfigOption";
 import {createTestModel} from "./acp-test-utils";
 
 describe("formatModelDisplayName", () => {
@@ -50,5 +56,40 @@ describe("createReasoningEffortConfigOption", () => {
         const option = createReasoningEffortConfigOption(efforts, "high");
         expect(option).toMatchObject({currentValue: "high", options: levels.map(value => ({value}))});
         expect(efforts.map(option => option.reasoningEffort)).toEqual(levels);
+    });
+});
+
+describe("client-supplied models", () => {
+    it("trims, dedupes and caps _meta.extraModels", () => {
+        expect(extraModelIdsFromMeta(undefined)).toEqual([]);
+        expect(extraModelIdsFromMeta({extraModels: "not-an-array"})).toEqual([]);
+        expect(extraModelIdsFromMeta({extraModels: [" a ", "a", "", 3, "b"]})).toEqual(["a", "b"]);
+        const many = Array.from({length: 80}, (_, i) => `m${i}`);
+        expect(extraModelIdsFromMeta({extraModels: many})).toHaveLength(64);
+    });
+
+    it("appends missing client models with Codex-shaped metadata", () => {
+        const models = [createTestModel({id: "gpt-6-terra", displayName: "GPT-6-Terra"})];
+        const result = withClientModels(
+            models,
+            ["my-gateway/model-v2", "gpt-6-terra"],
+            [{reasoningEffort: "high", description: "High"}],
+            "high",
+        );
+        expect(result).toHaveLength(2);
+        expect(result[1]).toMatchObject({
+            id: "my-gateway/model-v2",
+            model: "my-gateway/model-v2",
+            displayName: "my-gateway/model-v2",
+            description: "",
+            supportedReasoningEfforts: [{reasoningEffort: "high", description: "High"}],
+            defaultReasoningEffort: "high",
+            inputModalities: ["text", "image"],
+        });
+        const option = createModelConfigOption(result, "gpt-6-terra") as {
+            options: Array<{value: string}>;
+        };
+        expect(option.options.map(option => option.value))
+            .toEqual(["gpt-6-terra", "my-gateway/model-v2"]);
     });
 });

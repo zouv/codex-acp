@@ -102,10 +102,12 @@ import type {ModeKind} from "./app-server/ModeKind";
 import {
     createModelConfigOption,
     createReasoningEffortConfigOption,
+    extraModelIdsFromMeta,
     findSupportedEffort,
     formatModelDisplayName,
     MODEL_CONFIG_ID,
     REASONING_EFFORT_CONFIG_ID,
+    withClientModels,
 } from "./ModelConfigOption";
 import type {TokenCount} from "./TokenCount";
 import {PromptTokenUsage, toPromptUsage, ZERO_TOKEN_COUNT} from "./TokenCount";
@@ -252,6 +254,8 @@ export interface SessionState extends SessionIndexTitleState {
     instructions?: SessionInstructions;
     currentModelId: string,
     availableModels: Array<Model>,
+    /** Client-supplied `_meta.extraModels`, re-applied when the provider replaces the catalog. */
+    clientExtraModels: string[],
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
     supportedInputModalities: Array<InputModality>,
     agentMode: AgentMode,
@@ -1406,6 +1410,13 @@ export class CodexAcpServer {
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, operation === "resume");
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
+        const clientExtraModels = extraModelIdsFromMeta(request._meta);
+        const modelsWithClient = withClientModels(
+            models,
+            clientExtraModels,
+            currentModel?.supportedReasoningEfforts ?? [],
+            currentModel?.defaultReasoningEffort ?? "medium",
+        );
         if (this.setupResponseOrdering && operation !== "resume") this.clientDelivery.beginSessionSetup(sessionId);
         const availableAgentModes = AgentMode.all(
             sessionMetadata.permissionProfiles,
@@ -1415,7 +1426,8 @@ export class CodexAcpServer {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
-            availableModels: models,
+            availableModels: modelsWithClient,
+            clientExtraModels,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(
@@ -1501,7 +1513,7 @@ export class CodexAcpServer {
             this.publishCurrentGoalAsync(sessionState, sessionGeneration);
             this.publishAsyncTasksAsync(sessionState, sessionGeneration);
         }
-        const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
+        const sessionModelState: LegacySessionModelState = this.createModelState(modelsWithClient, currentModelId);
         const sessionModeState: SessionModeState =
             sessionState.agentMode.toSessionModeState(
                 sessionState.clientCapabilities.airClient,
@@ -3051,9 +3063,18 @@ export class CodexAcpServer {
     private async applyResumedModels(sessionState: SessionState, client: CodexAcpClient, resumed: SessionMetadata): Promise<void> {
         await this.updateSessionConfig(sessionState, () => {
             const {model, effort} = ModelId.fromString(sessionState.currentModelId);
-            sessionState.availableModels = resumed.models;
-            sessionState.currentModelId = client.createModelId(resumed.models, model, effort as ReasoningEffort).toString();
-            const currentModel = this.findCurrentModel(resumed.models, sessionState.currentModelId);
+            const resumedCurrent = this.findCurrentModel(resumed.models, ModelId.create(model, effort).toString())
+                ?? resumed.models.find(candidate => candidate.isDefault)
+                ?? resumed.models[0];
+            const modelsWithClient = withClientModels(
+                resumed.models,
+                sessionState.clientExtraModels,
+                resumedCurrent?.supportedReasoningEfforts ?? [],
+                resumedCurrent?.defaultReasoningEffort ?? "medium",
+            );
+            sessionState.availableModels = modelsWithClient;
+            sessionState.currentModelId = client.createModelId(modelsWithClient, model, effort as ReasoningEffort).toString();
+            const currentModel = this.findCurrentModel(modelsWithClient, sessionState.currentModelId);
             sessionState.supportedReasoningEfforts = currentModel?.supportedReasoningEfforts ?? [];
             sessionState.supportedInputModalities = currentModel?.inputModalities ?? ["text", "image"];
             sessionState.currentModelSupportsFast = modelSupportsFast(currentModel);
@@ -3698,6 +3719,13 @@ export class CodexAcpServer {
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
+        const clientExtraModels = extraModelIdsFromMeta(request._meta);
+        const modelsWithClient = withClientModels(
+            models,
+            clientExtraModels,
+            currentModel?.supportedReasoningEfforts ?? [],
+            currentModel?.defaultReasoningEffort ?? "medium",
+        );
         const availableAgentModes = AgentMode.all(
             sessionMetadata.permissionProfiles,
             sessionMetadata.approvalPolicy,
@@ -3706,7 +3734,8 @@ export class CodexAcpServer {
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
-            availableModels: models,
+            availableModels: modelsWithClient,
+            clientExtraModels,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
             agentMode: AgentMode.getInitialAgentMode(
@@ -3773,7 +3802,7 @@ export class CodexAcpServer {
             await this.publishAvailableCommands(sessionState, requestedSessionGeneration);
         }
         await this.publishCurrentGoalBestEffort(sessionState, requestedSessionGeneration, true);
-        const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
+        const sessionModelState: LegacySessionModelState = this.createModelState(modelsWithClient, currentModelId);
         const sessionModeState: SessionModeState =
             sessionState.agentMode.toSessionModeState(
                 sessionState.clientCapabilities.airClient,

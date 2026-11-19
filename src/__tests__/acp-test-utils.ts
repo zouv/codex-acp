@@ -447,6 +447,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         sessionId,
         currentModelId: "model-id[effort]",
         availableModels: [],
+        clientExtraModels: [],
         supportedReasoningEfforts: [],
         supportedInputModalities: ["text", "image"],
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
