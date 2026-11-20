@@ -48,7 +48,10 @@ export function extraModelIdsFromMeta(meta: unknown): string[] {
     for (const item of raw) {
         if (typeof item !== "string") continue;
         const id = item.trim();
-        if (!id || seen.has(id)) continue;
+        // The ACP model id is also the Codex model slug here; a bracket is the
+        // effort separator (`model[effort]`), so an id that carries one would
+        // break ModelId.fromString.
+        if (!id || id.includes("[") || id.includes("]") || seen.has(id)) continue;
         seen.add(id);
         out.push(id);
         if (out.length >= MAX_EXTRA_MODELS) break;

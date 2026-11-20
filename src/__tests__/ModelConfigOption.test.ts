@@ -64,6 +64,7 @@ describe("client-supplied models", () => {
         expect(extraModelIdsFromMeta(undefined)).toEqual([]);
         expect(extraModelIdsFromMeta({extraModels: "not-an-array"})).toEqual([]);
         expect(extraModelIdsFromMeta({extraModels: [" a ", "a", "", 3, "b"]})).toEqual(["a", "b"]);
+        expect(extraModelIdsFromMeta({extraModels: ["claude-opus-5[1m]", "ok-model"]})).toEqual(["ok-model"]);
         const many = Array.from({length: 80}, (_, i) => `m${i}`);
         expect(extraModelIdsFromMeta({extraModels: many})).toHaveLength(64);
     });
